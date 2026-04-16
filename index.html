@@ -32,7 +32,7 @@ nav{display:flex;gap:.2rem;flex-wrap:wrap;}
 .board{display:none;}.board.active{display:block;}
 .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:1.25rem;}
 .grid-1{display:grid;grid-template-columns:1fr;gap:1.25rem;}
-@media(max-width:860px){.grid-2{grid-template-columns:1fr;}}
+@media(max-width:860px){.grid-2{grid-template-columns:1fr;}}@media(max-width:640px){.header-inner{flex-wrap:wrap;height:auto;padding:.45rem 0;gap:.35rem;}.site-name{font-size:.9rem;}nav{width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:.25rem;}.tab-btn{padding:.32rem .3rem;font-size:.78rem;text-align:center;}.date-badge{width:100%;text-align:center;font-size:.7rem;}}
 .sub-section{margin:1.5rem 0 .75rem;}
 .sub-section h2{font-size:1.05rem;font-weight:700;color:var(--copy);padding-left:.75rem;border-left:3px solid var(--brand);}
 .surface-panel{border:1px solid #e2e8f0b3;border-radius:1.2rem;background:white;box-shadow:0 18px 50px -28px rgba(15,23,42,.22);overflow:hidden;}
@@ -409,10 +409,14 @@ const baseOpts=(dualY=false,pctLeft=false,pctRight=false)=>({
     ...(dualY?{yRight:{type:'linear',position:'right',ticks:{font:{size:10},callback:v=>pctRight?(v*100).toFixed(0)+'%':v.toLocaleString()},grid:{drawOnChartArea:false},title:{display:false}}}:{})
   }
 });
+const NO_POINT_IDS=new Set(['chart_cld','chart_avp','chart_lf','chart_col','chart_bdi','chart_oil','chart_pet','chart_pu']);
+const DATE_TRUNC_IDS=new Set(['chart_elec','chart_gen','chart_ep','chart_prx','chart_gas','chart_kdp','chart_kd']);
+function truncLabels(id,labels){return DATE_TRUNC_IDS.has(id)?labels.map(l=>typeof l==='string'&&l.length>7?l.slice(0,7):l):labels;}
 function mkLine(id,labels,seriesObj,rightKeys=[],pctLeft=false,pctRight=false){
   const cv=document.getElementById(id);if(!cv)return;
-  const ds=Object.keys(seriesObj).map((k,i)=>({label:k,data:seriesObj[k],borderColor:C[i%C.length],backgroundColor:C[i%C.length]+'22',yAxisID:rightKeys.includes(k)?'yRight':'yLeft',borderWidth:2.5,tension:.25,pointRadius:2,pointHoverRadius:4.5,spanGaps:true}));
-  new Chart(cv,{type:'line',data:{labels,datasets:ds},options:baseOpts(rightKeys.length>0,pctLeft,pctRight)});
+  const pr=NO_POINT_IDS.has(id)?0:2;
+  const ds=Object.keys(seriesObj).map((k,i)=>({label:k,data:seriesObj[k],borderColor:C[i%C.length],backgroundColor:C[i%C.length]+'22',yAxisID:rightKeys.includes(k)?'yRight':'yLeft',borderWidth:2.5,tension:.25,pointRadius:pr,pointHoverRadius:4.5,spanGaps:true}));
+  new Chart(cv,{type:'line',data:{labels:truncLabels(id,labels),datasets:ds},options:baseOpts(rightKeys.length>0,pctLeft,pctRight)});
 }
 function mkBar(id,labels,seriesObj,stacked=false,rightKeys=[],yMin=undefined){
   const cv=document.getElementById(id);if(!cv)return;
@@ -420,7 +424,7 @@ function mkBar(id,labels,seriesObj,stacked=false,rightKeys=[],yMin=undefined){
   const opts=baseOpts(rightKeys.length>0);
   if(stacked){opts.scales.x.stacked=true;opts.scales.yLeft.stacked=true;}
   if(yMin!==undefined){opts.scales.yLeft.min=yMin;}
-  new Chart(cv,{type:'bar',data:{labels,datasets:ds},options:opts});
+  new Chart(cv,{type:'bar',data:{labels:truncLabels(id,labels),datasets:ds},options:opts});
 }
 function mkStackedBar(id,labels,seriesObj){
   const cv=document.getElementById(id);if(!cv)return;
@@ -430,21 +434,27 @@ function mkStackedBar(id,labels,seriesObj){
 }
 function mkCombo(id,labels,seriesObj,barKeys=[],rightKeys=[],pctLeft=false,pctRight=false){
   const cv=document.getElementById(id);if(!cv)return;
-  const ds=Object.keys(seriesObj).map((k,i)=>{const isBar=barKeys.includes(k);return{type:isBar?'bar':'line',label:k,data:seriesObj[k],backgroundColor:isBar?CB[i%CB.length]:C[i%C.length]+'22',borderColor:C[i%C.length],yAxisID:rightKeys.includes(k)?'yRight':'yLeft',borderWidth:isBar?0:2.5,borderRadius:isBar?3:0,tension:.25,pointRadius:2,pointHoverRadius:4.5,spanGaps:true,stack:isBar?'s1':undefined,order:isBar?2:1};});
+  const ds=Object.keys(seriesObj).map((k,i)=>{const isBar=barKeys.includes(k);return{type:isBar?'bar':'line',label:k,data:seriesObj[k],backgroundColor:isBar?CB[i%CB.length]:C[i%C.length]+'22',borderColor:C[i%C.length],yAxisID:rightKeys.includes(k)?'yRight':'yLeft',borderWidth:isBar?0:2.5,borderRadius:isBar?3:0,tension:.25,pointRadius:isBar?2:(NO_POINT_IDS.has(id)?0:2),pointHoverRadius:4.5,spanGaps:true,stack:isBar?'s1':undefined,order:isBar?2:1};});
   new Chart(cv,{type:'bar',data:{labels,datasets:ds},options:baseOpts(rightKeys.length>0,pctLeft,pctRight)});
 }
-function lastTwo(arr){const v=arr.map((x,i)=>[x,i]).filter(([x])=>x!=null);return v.length<2?null:[v[v.length-2][0],v[v.length-1][0]];}
-function makeDeltaChips(id,seriesObj,maxChips=8){
+function lastTwo(arr){const v=arr.map((x,i)=>[x,i]).filter(([x])=>x!=null);if(v.length===0)return null;if(v.length===1)return[null,v[0][0]];return[v[v.length-2][0],v[v.length-1][0]];}
+function makeDeltaChips(id,seriesObj,maxChips=8,filterKeys=null){
   const el=document.getElementById(id+'-chips');if(!el)return;
   const chips=[];
   for(const[k,vals]of Object.entries(seriesObj)){
+    if(filterKeys&&!filterKeys.includes(k))continue;
     const p=lastTwo(vals);if(!p)continue;
-    const d=p[1]-p[0];
-    const arrow=d>0.001?'↑':d<-0.001?'↓':'→';
-    const cls=d>0.001?'dc-up':d<-0.001?'dc-dn':'dc-flat';
-    const abs=Math.abs(d);
-    const ds=abs<0.01?abs.toFixed(4):abs<10?abs.toFixed(2):abs.toFixed(1);
-    chips.push(`<span class="delta-chip ${cls}">● ${k} ${arrow}${ds}</span>`);
+    if(p[0]===null){
+      const v=p[1];const vs=Math.abs(v)<0.01?v.toFixed(4):Math.abs(v)<10?v.toFixed(2):v.toFixed(1);
+      chips.push(`<span class="delta-chip dc-flat">● ${k} ${vs}</span>`);
+    } else {
+      const d=p[1]-p[0];
+      const arrow=d>0.001?'↑':d<-0.001?'↓':'→';
+      const cls=d>0.001?'dc-up':d<-0.001?'dc-dn':'dc-flat';
+      const abs=Math.abs(d);
+      const ds=abs<0.01?abs.toFixed(4):abs<10?abs.toFixed(2):abs.toFixed(1);
+      chips.push(`<span class="delta-chip ${cls}">● ${k} ${arrow}${ds}</span>`);
+    }
   }
   el.innerHTML=chips.slice(0,maxChips).join('');
 }
@@ -455,19 +465,19 @@ window.addEventListener('DOMContentLoaded',()=>{
   mkLine('chart_prx',D.prx.labels,D.prx.series);makeDeltaChips('chart_prx',D.prx.series);
   mkLine('chart_gas',D.gas.labels,D.gas.series);makeDeltaChips('chart_gas',D.gas.series);
   mkLine('chart_cld',D.cld.labels,D.cld.series);makeDeltaChips('chart_cld',D.cld.series);
-  mkLine('chart_avp',D.avp.labels,D.avp.series,['同比'],false,true);makeDeltaChips('chart_avp',D.avp.series);
-  mkLine('chart_lf',D.lf.labels,D.lf.series,[],true,false);makeDeltaChips('chart_lf',D.lf.series);
+  mkLine('chart_avp',D.avp.labels,D.avp.series,['同比'],false,true);makeDeltaChips('chart_avp',D.avp.series,8,['2026','同比']);
+  mkLine('chart_lf',D.lf.labels,D.lf.series,[],true,false);makeDeltaChips('chart_lf',D.lf.series,8,['2026','同比']);
   mkLine('chart_kd',D.kd.labels,D.kd.series);makeDeltaChips('chart_kd',D.kd.series);
   mkLine('chart_kdp',D.kdp.labels,D.kdp.series,['顺丰']);makeDeltaChips('chart_kdp',D.kdp.series);
-  mkLine('chart_kdw',D.kdw.labels,D.kdw.series);makeDeltaChips('chart_kdw',D.kdw.series);
+  mkLine('chart_kdw',D.kdw.labels,D.kdw.series);makeDeltaChips('chart_kdw',D.kdw.series,8,['2026','同比']);
   mkLine('chart_col',D.col.labels,D.col.series,['PDCI']);makeDeltaChips('chart_col',D.col.series);
   mkLine('chart_bdi',D.bdi.labels,D.bdi.series,['BDI']);makeDeltaChips('chart_bdi',D.bdi.series);
-  mkBar('chart_gi',D.gi.labels,D.gi.series,false);makeDeltaChips('chart_gi',D.gi.series);
+  mkBar('chart_gi',D.gi.labels,D.gi.series,false);makeDeltaChips('chart_gi',D.gi.series,8,['2026','同比']);
   mkCombo('chart_tb',D.tb.labels,D.tb.series,['变压器','组合电器','开关柜','断路器','隔离开关','继保监控','避雷器','互感器','电容器','电抗器','其他'],['同比'],false,true);makeDeltaChips('chart_tb',D.tb.series);
   mkLine('chart_exp_reg',D.exp_reg.labels,D.exp_reg.series,[],true,false);makeDeltaChips('chart_exp_reg',D.exp_reg.series);
   mkLine('chart_exp_prd',D.exp_prd.labels,D.exp_prd.series,[],true,false);makeDeltaChips('chart_exp_prd',D.exp_prd.series);
-  mkLine('chart_oil',D.oil.labels,D.oil.series);makeDeltaChips('chart_oil',D.oil.series);
-  mkBar('chart_opec',D.opec.labels,D.opec.series,false,[],2500);makeDeltaChips('chart_opec',D.opec.series);
+  mkLine('chart_oil',D.oil.labels,D.oil.series);makeDeltaChips('chart_oil',D.oil.series,8,['2026','同比']);
+  mkBar('chart_opec',D.opec.labels,D.opec.series,false,[],2500);makeDeltaChips('chart_opec',D.opec.series,8,['2026','同比']);
   mkLine('chart_pet',D.pet.labels,D.pet.series);makeDeltaChips('chart_pet',D.pet.series);
   mkStackedBar('chart_px',D.px.labels,D.px.series);makeDeltaChips('chart_px',D.px.series);
   mkLine('chart_pu',D.pu.labels,D.pu.series,['MDI价差','TDI价差']);makeDeltaChips('chart_pu',D.pu.series);
